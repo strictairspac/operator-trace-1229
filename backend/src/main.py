@@ -4,11 +4,13 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from src.config.database import engine
 from src.services.traces import queue
-from src.routes import auth,datasets,plans,traces,audit
+from src.routes import auth,datasets,plans,traces,audit,experiments
 from src.middlewares.errors import install_errors
 from src.middlewares.requests import RequestTrace
+from src.bootstrap import ensure_schema
 @asynccontextmanager
 async def lifespan(app):
+ ensure_schema()
  if os.getenv('SEED_DEMO','true').lower()=='true':
   try:
    from scripts.seed_demo import seed
@@ -17,8 +19,8 @@ async def lifespan(app):
  yield
 app=FastAPI(title='松原 · 分析算子执行剖面仪',lifespan=lifespan)
 app.add_middleware(RequestTrace);install_errors(app)
-for r in (auth,datasets,plans,traces,audit):app.include_router(r.router)
+for r in (auth,datasets,plans,traces,audit,experiments):app.include_router(r.router)
 @app.get('/health')
 def health():
  with engine.connect() as c:c.execute(text('SELECT 1'))
- queue.ping();return {'status':'ok'}
+ queue.ping();experiments.queue.ping();return {'status':'ok'}

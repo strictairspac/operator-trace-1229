@@ -7,3 +7,5 @@ class Plan(Base):
  dataset_id=Column(Integer,ForeignKey('datasets.id'),nullable=False)
  steps=Column(JSON,nullable=False)
  note=Column(String(500),nullable=False,default='')
+ # 每次保存产生新版本；实验套分支引用受理时的版本，计划后续修改不影响在途实验
+ version=Column(Integer,nullable=False,default=1,server_default='1')

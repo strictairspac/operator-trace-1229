@@ -5,7 +5,7 @@
 ## 场景与模块
 上游是设备可靠性课程的采样文件、传感器表和分析需求。过去在白板画算子、手动算中间行数，再把截图发给助教；重复键丢失、空结果误判、输入版本变化后无法复现实验是三个痛点。本站保存数据集与有界计划 DSL，worker 真执行并保存不可变快照/逐步摘要，下游讲师和同学只读复查。
 
-数据集录入/编辑、算子计划编排、执行队列、算子剖面/JSON导出四个业务页面；管理员有审计。三个实体 datasets / plans / traces 均贯穿数据库、模型、schema、service、controller、route、前端api/store/page。
+数据集录入/编辑、算子计划编排、实验套DAG编排、执行队列、算子剖面/JSON导出五个业务页面；管理员有审计。三个实体 datasets / plans / traces 均贯穿数据库、模型、schema、service、controller、route、前端api/store/page；实验套由 experiments / experiment_branches 两张表与独立 service/route/页面承载。
 
 ## 启动
 ```sh
@@ -33,12 +33,21 @@ docker compose exec -T backend python -m scripts.seed_demo
 7. 09:30 导出 `trace-<id>.json`，viewer只读验证。
 8. 10:00 admin 查看审计。
 
-seed三账号、三个数据集（240行日班、空数据、重复右键）、三个对应计划。固定公式，无随机数；自然键补缺不覆盖用户修改，连续运行不新增。
+seed三账号、三个数据集（240行日班、空数据、重复右键）、三个对应计划，外加两个实验套分支计划与一套「上游均值→下游计数」演示实验套。固定公式，无随机数；自然键补缺不覆盖用户修改，连续运行不新增。
 
 ## 算法与边界
 这是教学内核模型，不是PostgreSQL执行器剖面。PostgreSQL真实保存业务元数据；Python worker真实计算表扫描、数值/相等筛选、构建哈希桶与内连接、Decimal累积分组。右表重复键保留倍数，空集合输出空集合。分组avg/sum保留6位小数，输出按规范JSON排序，SHA-256使用排序key紧凑JSON UTF-8；相同输入和计划结果摘要相同。每步输出输入/输出行数、耗时、明细、前5行与checksum。scan 的 input_rows=0 表示从源读取，detail.scanned_rows为扫描源行数；row_visits是扫描/过滤/哈希构建与探测/聚合各步逻辑行访问总和，不代表物理I/O。
 
 DSL最多6步，首步仅scan readings；filter eq/gte/lte；hash_join仅readings.sensor_id=sensors.sensor_id且最多一次；group仅value的count/sum/avg。禁止eval、任意代码和任意SQL。最多100传感器、2000采样、10000连接输出行；超限失败，不保存部分结果。JSON非法、字段错误、非法算子、孤立引用、重复名有可恢复错误。任务使用Redis简单单消费者，进程崩溃后的running任务不自动重试，保留供人工复查后新建任务。
+
+## 实验套 DAG 编排（多计划依赖）
+一堂实验可由多份相互依赖的计划组成一套，在「实验编排」页受理并查看分支进度。
+- **分组当采样**：分支计划必须按含 `sensor_id` 的键分组，上游输出行的 `count/sum/avg` 被当作下游采样值；每个上游输出行生成一条独立 reading，**同值行照算**，不去重不合并；多上游的采样表按顺序拼接。
+- **依赖与并发**：受理时做引用完整性与 Kahn 成环检测，**依赖成环直接拒收（400）**；无依赖的根分支入队并发执行（worker 线程池，并发度 `BRANCH_CONCURRENCY` 默认3），下游等自己的全部上游 `completed` 才解锁开跑。
+- **版本冻结**：计划每次保存自增 `version`；实验套在受理时冻结数据集与每个计划版本的不可变快照，期间再改计划只产生新版本，**原套仍用受理时版本**。
+- **失败重试**：某分支失败则整套标记 failed；在剖面页发起重试只重排队 failed 分支，**已完成分支原样留用**，blocked 分支继续等待。worker 崩溃残留的 running 分支在启动时转 failed，供人工重试。
+- **收齐才公开**：全部分支完成前接口只返回进度（不返回 result/snapshot）；全部 completed 后一次性写入公开结果并置 `published`，**重试不会重复发布**，公开后才可导出整套 JSON。
+- 边界：单套最多20个分支；下游声明的 measure 必须与上游真实聚合一致，否则受理拒收；合成采样超过2000条上限失败。
 
 ## 技术、目录与本地开发
 Python3.11 / FastAPI / SQLAlchemy / psycopg / Redis / PostgreSQL16；原生 HTML/CSS/JS ES modules / nginx1.27。五服务frontend/backend/worker/db/redis均健康探针，命名卷数据库/Redis/共享产物。DB/Redis健康后启动backend，backend健康后启worker/frontend。

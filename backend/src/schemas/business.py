@@ -28,3 +28,15 @@ class PlanInput(BaseModel):
 class TraceInput(BaseModel):
  name:str=Field(min_length=2,max_length=120)
  plan_id:int
+class BranchInput(BaseModel):
+ model_config=ConfigDict(extra='forbid')
+ node_key:str=Field(min_length=1,max_length=80)
+ plan_id:int=Field(ge=1)
+ depends_on:list[str]=Field(default_factory=list)
+ measure:Literal['count','sum','avg']='avg'
+class ExperimentInput(BaseModel):
+ name:str=Field(min_length=2,max_length=120)
+ dataset_id:int
+ branches:list[BranchInput]=Field(min_length=1,max_length=20)
+ # DAG 结构（成环/孤立引用/重复键）在 service.create 校验并返回 400，
+ # 避免被 FastAPI 包成不含中文原因的 422

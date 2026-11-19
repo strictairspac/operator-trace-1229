@@ -11,5 +11,9 @@ def save(data,item_id=None):
   if not s.get(Dataset,data.dataset_id):raise HTTPException(404,'未找到数据集')
   row=s.get(Plan,item_id) if item_id else Plan()
   if not row:raise HTTPException(404,'未找到记录')
+  is_new=row.id is None
   for k,v in data.model_dump().items():setattr(row,k,v)
+  # 每次保存产生新版本；在途实验快照仍引用受理时的旧版本
+  if not is_new:row.version=(row.version or 1)+1
+  else:row.version=1
   s.add(row);s.commit();s.refresh(row);return record(row)
